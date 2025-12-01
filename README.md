@@ -2,7 +2,13 @@
 
 跨平台（桌面优先）的 Markdown 编辑与预览工具，采用 Fluent UI 风格。支持本地文件的打开、编辑、保存/另存为，实时预览和快捷键操作。
 
+![1](./docs/imgs/1.png)
+![2](./docs/imgs/2.png)
+![3](./docs/imgs/3.png)
+![4](./docs/imgs/4.png)
+
 ## 功能
+
 - Fluent UI 桌面界面、明暗主题切换
 - Markdown 实时预览（GitHub 风格，表格/列表/链接/图片等）
 - 同目录文件侧栏，可折叠与切换
@@ -12,12 +18,14 @@
 - 链接外部打开，代码块选中高亮
 
 ## 运行
+
 ```bash
 flutter pub get
 flutter run -d linux    # 或 macos/windows
 ```
 
 ## 主要依赖
+
 - `fluent_ui`：桌面 UI 风格
 - `flutter_markdown` + `markdown`：Markdown 渲染
 - `file_selector`：打开/保存对话框
