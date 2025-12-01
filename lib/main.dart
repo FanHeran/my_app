@@ -1,14 +1,27 @@
 import 'dart:io';
 
 import 'package:file_selector/file_selector.dart';
-import 'package:flutter/material.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:fluent_ui/fluent_ui.dart';
 import 'package:flutter/services.dart';
+import 'package:flutter_markdown/flutter_markdown.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
+import 'package:flutter/material.dart' as m;
+import 'package:window_manager/window_manager.dart';
 
-void main() {
+void main() async {
+  WidgetsFlutterBinding.ensureInitialized();
+  await windowManager.ensureInitialized();
+  const windowOptions = WindowOptions(
+    minimumSize: Size(800, 600),
+    center: true,
+    title: 'Markdown 桌面编辑器',
+  );
+  await windowManager.waitUntilReadyToShow(windowOptions, () async {
+    await windowManager.show();
+    await windowManager.focus();
+  });
   runApp(const MarkdownDesktopApp());
 }
 
@@ -40,68 +53,28 @@ class _MarkdownDesktopAppState extends State<MarkdownDesktopApp> {
     });
   }
 
-  ThemeData _buildLightTheme() {
-    return ThemeData(
-      colorScheme: ColorScheme.fromSeed(
-        seedColor: Colors.blueGrey,
-        brightness: Brightness.light,
-      ),
+  FluentThemeData _buildLightTheme() {
+    return FluentThemeData(
+      brightness: Brightness.light,
+      accentColor: Colors.blue,
+      visualDensity: VisualDensity.compact,
       scaffoldBackgroundColor: const Color(0xFFF4F6F8),
-      appBarTheme: const AppBarTheme(
-        elevation: 0.5,
-        surfaceTintColor: Colors.transparent,
-        backgroundColor: Color(0xFFEFF1F4),
-        toolbarHeight: 48,
-        titleSpacing: 12,
-      ),
-      cardTheme: CardThemeData(
-        color: Colors.white,
-        surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        elevation: 0,
-      ),
-      textSelectionTheme: TextSelectionThemeData(
-        selectionColor: Colors.blueGrey.withOpacity(0.20),
-        selectionHandleColor: Colors.blueGrey,
-      ),
-      useMaterial3: true,
-      fontFamily: Platform.isLinux ? "Inter" : "Segoe UI",
     );
   }
 
-  ThemeData _buildDarkTheme() {
-    final ColorScheme colors = ColorScheme.fromSeed(
-      seedColor: Colors.blueGrey,
+  FluentThemeData _buildDarkTheme() {
+    return FluentThemeData(
       brightness: Brightness.dark,
-    );
-    return ThemeData(
-      colorScheme: colors,
+      accentColor: Colors.blue,
+      visualDensity: VisualDensity.compact,
       scaffoldBackgroundColor: const Color(0xFF0F1419),
-      appBarTheme: AppBarTheme(
-        elevation: 0.2,
-        surfaceTintColor: Colors.transparent,
-        backgroundColor: Colors.grey.shade900,
-        toolbarHeight: 48,
-        titleSpacing: 12,
-      ),
-      cardTheme: CardThemeData(
-        color: Colors.grey.shade900,
-        surfaceTintColor: Colors.transparent,
-        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
-        elevation: 0,
-      ),
-      textSelectionTheme: TextSelectionThemeData(
-        selectionColor: colors.primary.withOpacity(0.25),
-        selectionHandleColor: colors.primary,
-      ),
-      useMaterial3: true,
-      fontFamily: Platform.isLinux ? "Inter" : "Segoe UI",
     );
   }
 
   @override
   Widget build(BuildContext context) {
-    return MaterialApp(
+    return FluentApp(
+      debugShowCheckedModeBanner: false,
       title: 'Markdown Desktop',
       theme: _buildLightTheme(),
       darkTheme: _buildDarkTheme(),
@@ -150,7 +123,10 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
   double _splitRatio = 0.55;
   // 拖动分隔条时的标记。
   bool _draggingSplit = false;
-  bool get _isDark => widget.themeMode == ThemeMode.dark;
+
+  String get _windowTitle => _currentPath != null
+      ? '${p.basename(_currentPath!)}${_dirty ? " *" : ''}'
+      : 'Markdown 桌面编辑器${_dirty ? " *" : ''}';
 
   @override
   void initState() {
@@ -159,11 +135,14 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
     _controller.addListener(_onTextChanged);
   }
 
+  bool get _isDark => widget.themeMode == ThemeMode.dark;
+
   void _onTextChanged() {
     // 文字变化即刻刷新预览，并标记未保存。
     setState(() {
       _dirty = true;
     });
+    _updateWindowTitle();
   }
 
   @override
@@ -180,6 +159,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
       _status = '新建 Markdown';
       _siblingFiles = const [];
     });
+    _updateWindowTitle();
   }
 
   Future<void> _openFile() async {
@@ -210,6 +190,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
         _status = '已打开 ${p.basename(path)}';
       });
       await _refreshSiblingFiles(path);
+      _updateWindowTitle();
     } catch (e) {
       _showError('打开失败: $e');
     }
@@ -238,7 +219,6 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
       targetPath = location.path;
     }
 
-    // 确定最终保存路径后写入磁盘。
     final String savePath = targetPath;
     setState(() {
       _saving = true;
@@ -253,6 +233,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
         _status = '已保存 ${p.basename(savePath)}';
       });
       await _refreshSiblingFiles(savePath);
+      _updateWindowTitle();
     } catch (e) {
       _showError('保存失败: $e');
     } finally {
@@ -266,9 +247,6 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
 
   void _showError(String message) {
     if (!mounted) return;
-    ScaffoldMessenger.of(
-      context,
-    ).showSnackBar(SnackBar(content: Text(message)));
     setState(() {
       _status = message;
     });
@@ -276,11 +254,8 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
 
   @override
   Widget build(BuildContext context) {
-    final String title = _currentPath != null
-        ? '${p.basename(_currentPath!)}${_dirty ? " *" : ''}'
-        : 'Markdown 桌面编辑器${_dirty ? " *" : ''}';
+    final String title = _windowTitle;
 
-    // 全局快捷键包裹，支持 Ctrl+S / Ctrl+Shift+S。
     return Shortcuts(
       shortcuts: const <ShortcutActivator, Intent>{
         SingleActivator(LogicalKeyboardKey.keyS, control: true): SaveIntent(),
@@ -302,94 +277,110 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
             },
           ),
         },
-        child: Focus(
-          autofocus: true,
-          child: Scaffold(
-            appBar: AppBar(
-              title: Row(
-                children: [
-                  IconButton(
-                    tooltip: '新建',
-                    icon: const Icon(Icons.note_add_outlined),
-                    onPressed: _newFile,
-                  ),
-                  IconButton(
-                    tooltip: '打开本地 Markdown',
-                    icon: const Icon(Icons.folder_open),
-                    onPressed: _openFile,
-                  ),
-                  IconButton(
-                    tooltip: '保存 (Ctrl+S)',
-                    icon: const Icon(Icons.save_outlined),
-                    onPressed: _saving ? null : () => _saveFile(),
-                  ),
-                  IconButton(
-                    tooltip: '另存为 (Ctrl+Shift+S)',
-                    icon: const Icon(Icons.save_as_outlined),
-                    onPressed: _saving ? null : () => _saveFile(saveAs: true),
-                  ),
-                  IconButton(
-                    tooltip: _isDark ? '切换为浅色' : '切换为深色',
-                    icon: Icon(
-                      _isDark
-                          ? Icons.wb_sunny_outlined
-                          : Icons.dark_mode_outlined,
-                    ),
-                    onPressed: widget.onToggleTheme,
-                  ),
-                  const Spacer(),
-                  Expanded(
-                    child: Text(
-                      title,
-                      textAlign: TextAlign.right,
-                      overflow: TextOverflow.ellipsis,
-                    ),
-                  ),
-                ],
-              ),
-              actions: const [],
-              bottom: PreferredSize(
-                preferredSize: const Size.fromHeight(36),
-                child: _buildStatusBar(context),
-              ),
-            ),
-            body: _buildWorkspace(context),
+        child: NavigationView(
+          // appBar: NavigationAppBar(
+          //   automaticallyImplyLeading: false,
+          //   title: Text(title, overflow: TextOverflow.ellipsis),
+          //   // height: 44,
+          //   backgroundColor: FluentTheme.of(
+          //     context,
+          //   ).accentColor.withOpacity(0.08),
+          // ),
+          content: ScaffoldPage(
+            padding: EdgeInsets.zero,
+            header: _buildCommandBar(context),
+            content: _buildWorkspace(context),
+            bottomBar: _buildStatusBar(context),
           ),
         ),
       ),
     );
   }
 
-  Widget _buildStatusBar(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
+  Future<void> _updateWindowTitle() async {
+    try {
+      await windowManager.setTitle(_windowTitle);
+    } catch (_) {
+      // 忽略窗口 API 错误，避免影响编辑体验。
+    }
+  }
+
+  Widget _buildCommandBar(BuildContext context) {
+    final theme = FluentTheme.of(context);
     return Container(
-      width: double.infinity,
-      padding: const EdgeInsets.symmetric(horizontal: 16, vertical: 8),
       decoration: BoxDecoration(
-        color: colors.surfaceVariant,
-        border: Border(top: BorderSide(color: colors.outlineVariant)),
+        color: theme.micaBackgroundColor,
+        border: Border(
+          bottom: BorderSide(color: theme.resources.surfaceStrokeColorDefault),
+        ),
+      ),
+      child: Row(
+        children: [
+          Expanded(
+            child: CommandBar(
+              mainAxisAlignment: MainAxisAlignment.start,
+              overflowBehavior: CommandBarOverflowBehavior.dynamicOverflow,
+              primaryItems: [
+                CommandBarButton(
+                  icon: const Icon(FluentIcons.add),
+                  label: const Text('新建'),
+                  onPressed: _newFile,
+                ),
+                CommandBarButton(
+                  icon: const Icon(FluentIcons.folder_open),
+                  label: const Text('打开'),
+                  onPressed: _openFile,
+                ),
+                CommandBarButton(
+                  icon: const Icon(FluentIcons.save),
+                  label: const Text('保存  Ctrl+S'),
+                  onPressed: _saving ? null : () => _saveFile(),
+                ),
+                CommandBarButton(
+                  icon: const Icon(FluentIcons.save_as),
+                  label: const Text('另存为  Ctrl+Shift+S'),
+                  onPressed: _saving ? null : () => _saveFile(saveAs: true),
+                ),
+              ],
+            ),
+          ),
+          const SizedBox(width: 12),
+          ToggleSwitch(
+            checked: _isDark,
+            content: Text(_isDark ? '暗色' : '浅色'),
+            onChanged: (_) => widget.onToggleTheme(),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildStatusBar(BuildContext context) {
+    final colors = FluentTheme.of(context);
+    return Container(
+      height: 36,
+      padding: const EdgeInsets.symmetric(horizontal: 12),
+      decoration: BoxDecoration(
+        color: colors.micaBackgroundColor,
+        border: Border(
+          top: BorderSide(color: colors.resources.surfaceStrokeColorDefault),
+        ),
       ),
       child: Row(
         children: [
           Icon(
-            _saving ? Icons.sync : Icons.info_outline,
+            _saving ? FluentIcons.sync : FluentIcons.info,
             size: 16,
-            color: colors.onSurfaceVariant,
+            color: colors.accentColor,
           ),
           const SizedBox(width: 8),
-          Expanded(
-            child: Text(
-              _status,
-              overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: colors.onSurfaceVariant),
-            ),
-          ),
+          Expanded(child: Text(_status, overflow: TextOverflow.ellipsis)),
           if (_currentPath != null) ...[
             const SizedBox(width: 12),
             Text(
               _currentPath!,
               overflow: TextOverflow.ellipsis,
-              style: TextStyle(color: colors.onSurfaceVariant),
+              style: const TextStyle(fontSize: 12),
             ),
           ],
         ],
@@ -411,8 +402,9 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
               _sidebarCollapsed
                   ? SizedBox(height: 44, child: _buildSidebarToggle(context))
                   : SizedBox(height: 220, child: _buildSidebar(context)),
+              const SizedBox(height: 8),
               Expanded(child: _buildEditor(context)),
-              const Divider(height: 1),
+              const Divider(size: 1),
               Expanded(child: _buildPreview(context)),
             ],
           );
@@ -447,44 +439,96 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
     );
   }
 
+  Widget _buildSidebar(BuildContext context) {
+    final colors = FluentTheme.of(context);
+    return Container(
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: colors.micaBackgroundColor,
+        border: Border(
+          right: BorderSide(color: colors.resources.surfaceStrokeColorDefault),
+        ),
+      ),
+      child: Column(
+        children: [
+          Row(
+            children: [
+              Icon(FluentIcons.folder_open, color: colors.accentColor),
+              const SizedBox(width: 8),
+              const Expanded(child: Text('同目录文件')),
+              IconButton(
+                icon: const Icon(FluentIcons.chevron_left),
+                onPressed: () => setState(() => _sidebarCollapsed = true),
+                style: ButtonStyle(
+                  padding: ButtonState.all(const EdgeInsets.all(4)),
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 8),
+          Expanded(
+            child: Container(
+              decoration: BoxDecoration(
+                color: colors.cardColor,
+                borderRadius: BorderRadius.circular(10),
+                border: Border.all(
+                  color: colors.resources.surfaceStrokeColorDefault,
+                ),
+              ),
+              child: _buildSiblingList(context),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+
+  Widget _buildSidebarToggle(BuildContext context) {
+    final colors = FluentTheme.of(context);
+    return Container(
+      width: 44,
+      color: colors.micaBackgroundColor,
+      child: IconButton(
+        icon: const Icon(FluentIcons.chevron_right),
+        onPressed: () => setState(() => _sidebarCollapsed = false),
+      ),
+    );
+  }
+
   Widget _buildEditor(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
+    final colors = FluentTheme.of(context);
     return Container(
       padding: const EdgeInsets.all(16),
-      color: colors.surfaceVariant.withOpacity(0.35),
+      color: colors.scaffoldBackgroundColor,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              Icon(Icons.edit_outlined, color: colors.primary),
+              Icon(FluentIcons.edit, color: colors.accentColor),
               const SizedBox(width: 8),
-              Text(
-                'Markdown 编辑',
-                style: Theme.of(context).textTheme.titleMedium,
-              ),
+              const Text('Markdown 编辑'),
             ],
           ),
           const SizedBox(height: 12),
           Expanded(
-            child: DecoratedBox(
+            child: Container(
               decoration: BoxDecoration(
-                color: colors.background,
+                color: colors.cardColor,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: colors.outlineVariant),
+                border: Border.all(
+                  color: colors.resources.surfaceStrokeColorDefault,
+                ),
               ),
-              child: TextField(
+              child: TextBox(
                 controller: _controller,
                 expands: true,
                 maxLines: null,
                 minLines: null,
                 keyboardType: TextInputType.multiline,
                 style: const TextStyle(fontFamily: 'monospace'),
-                decoration: const InputDecoration(
-                  hintText: '在这里输入 Markdown ...',
-                  border: InputBorder.none,
-                  contentPadding: EdgeInsets.all(16),
-                ),
+                decoration: null,
+                padding: const EdgeInsets.all(16),
               ),
             ),
           ),
@@ -494,54 +538,78 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
   }
 
   Widget _buildPreview(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
+    final colors = FluentTheme.of(context);
+    // 为 Markdown 提供一份 Material 风格的主题，确保组件样式一致。
+    final baseTextTheme = m.ThemeData(
+      brightness: _isDark ? Brightness.dark : Brightness.light,
+      useMaterial3: true,
+    ).textTheme;
+    final m.TextTheme safeTextTheme = baseTextTheme.copyWith(
+      bodyMedium: (baseTextTheme.bodyMedium ?? const m.TextStyle()).copyWith(
+        fontSize: baseTextTheme.bodyMedium?.fontSize ?? 14,
+      ),
+    );
+    final materialTheme = m.ThemeData(
+      colorScheme: m.ColorScheme.fromSeed(
+        seedColor: colors.accentColor,
+        brightness: _isDark ? Brightness.dark : Brightness.light,
+      ),
+      textTheme: safeTextTheme,
+      useMaterial3: true,
+    );
+
     return Container(
       padding: const EdgeInsets.all(16),
-      color: colors.surfaceVariant.withOpacity(0.45),
+      color: colors.scaffoldBackgroundColor,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              Icon(Icons.visibility_outlined, color: colors.primary),
+              Icon(FluentIcons.view, color: colors.accentColor),
               const SizedBox(width: 8),
-              Text('实时预览', style: Theme.of(context).textTheme.titleMedium),
+              const Text('实时预览'),
             ],
           ),
           const SizedBox(height: 12),
           Expanded(
-            child: DecoratedBox(
+            child: Container(
               decoration: BoxDecoration(
-                color: colors.background,
+                color: colors.cardColor,
                 borderRadius: BorderRadius.circular(12),
-                border: Border.all(color: colors.outlineVariant),
+                border: Border.all(
+                  color: colors.resources.surfaceStrokeColorDefault,
+                ),
               ),
               child: DefaultSelectionStyle.merge(
                 // 强化选中文本高亮，特别是代码块内。
                 selectionColor: const Color(0xFFB7D5FF),
-                cursorColor: colors.primary,
-                child: Markdown(
-                  data: _controller.text,
-                  selectable: true,
-                  extensionSet:
-                      md.ExtensionSet.gitHubFlavored, // 支持表格、列表等 GFM 语法。
-                  softLineBreak: true, // 单回车即换行。
-                  padding: const EdgeInsets.all(16),
-                  onTapLink: (text, href, title) {
-                    if (href != null) {
-                      _openLink(href);
-                    }
-                  },
-                  builders: {'u': UnderlineBuilder()},
-                  styleSheet: MarkdownStyleSheet.fromTheme(Theme.of(context))
-                      .copyWith(
-                        code: const TextStyle(fontFamily: 'monospace'),
-                        codeblockPadding: const EdgeInsets.all(12),
-                        blockquoteDecoration: BoxDecoration(
-                          color: colors.surfaceVariant.withOpacity(0.6),
-                          borderRadius: BorderRadius.circular(8),
+                cursorColor: colors.accentColor,
+                child: m.Theme(
+                  data: materialTheme,
+                  child: Markdown(
+                    data: _controller.text,
+                    selectable: true,
+                    extensionSet:
+                        md.ExtensionSet.gitHubFlavored, // 支持表格、列表等 GFM 语法。
+                    softLineBreak: true, // 单回车即换行。
+                    padding: const EdgeInsets.all(16),
+                    onTapLink: (text, href, title) {
+                      if (href != null) {
+                        _openLink(href);
+                      }
+                    },
+                    builders: {'u': UnderlineBuilder()},
+                    styleSheet: MarkdownStyleSheet.fromTheme(materialTheme)
+                        .copyWith(
+                          code: const TextStyle(fontFamily: 'monospace'),
+                          codeblockPadding: const EdgeInsets.all(12),
+                          blockquoteDecoration: BoxDecoration(
+                            color: colors.micaBackgroundColor,
+                            borderRadius: BorderRadius.circular(8),
+                          ),
                         ),
-                      ),
+                  ),
                 ),
               ),
             ),
@@ -553,7 +621,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
 
   // 编辑/预览的可拖动分隔条（仅宽屏）。
   Widget _buildDragHandle(double availableWidth) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
+    final theme = FluentTheme.of(context);
     return MouseRegion(
       cursor: SystemMouseCursors.resizeLeftRight,
       child: GestureDetector(
@@ -574,14 +642,14 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
         child: Container(
           width: 12,
           color: _draggingSplit
-              ? colors.primary.withOpacity(0.12)
-              : colors.outlineVariant.withOpacity(0.4),
+              ? theme.accentColor.withOpacity(0.12)
+              : theme.resources.surfaceStrokeColorDefault,
           child: Center(
             child: Container(
               width: 2,
               height: 64,
               decoration: BoxDecoration(
-                color: colors.outline,
+                color: theme.resources.controlStrokeColorSecondary,
                 borderRadius: BorderRadius.circular(2),
               ),
             ),
@@ -589,20 +657,6 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
         ),
       ),
     );
-  }
-
-  Future<void> _openLink(String href) async {
-    final Uri uri = Uri.parse(href);
-    if (!await canLaunchUrl(uri)) {
-      _showError('无法打开链接');
-      return;
-    }
-
-    final bool ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
-
-    if (!ok) {
-      _showError('无法打开链接');
-    }
   }
 
   // 列出当前文件所在目录的其他 Markdown/TXT 文件。
@@ -622,81 +676,19 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
 
     return ListView.separated(
       itemCount: _siblingFiles.length,
-      separatorBuilder: (_, __) => const Divider(height: 1),
+      separatorBuilder: (_, __) => const Divider(size: 1),
       itemBuilder: (context, index) {
         final path = _siblingFiles[index];
         final name = p.basename(path);
         final bool isActive = _currentPath == path;
-        return ListTile(
-          dense: true,
+        return ListTile.selectable(
           selected: isActive,
-          selectedTileColor: Theme.of(
-            context,
-          ).colorScheme.primary.withOpacity(0.08),
-          title: Text(
-            name,
-            overflow: TextOverflow.ellipsis,
-            style: TextStyle(
-              fontWeight: isActive ? FontWeight.w600 : FontWeight.normal,
-            ),
-          ),
-          onTap: isActive ? null : () => _openFileAtPath(path),
+          selectionMode: ListTileSelectionMode.single,
+          leading: const Icon(FluentIcons.page_header),
+          title: Text(name, overflow: TextOverflow.ellipsis),
+          onPressed: isActive ? null : () => _openFileAtPath(path),
         );
       },
-    );
-  }
-
-  // 同目录文件侧边栏。
-  Widget _buildSidebar(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Container(
-      padding: const EdgeInsets.all(12),
-      decoration: BoxDecoration(color: colors.surfaceVariant.withOpacity(0.45)),
-      child: Column(
-        children: [
-          Row(
-            children: [
-              Icon(Icons.folder_open, color: colors.primary),
-              const SizedBox(width: 8),
-              const Expanded(child: Text('同目录文件')),
-              IconButton(
-                tooltip: '折叠',
-                icon: const Icon(Icons.chevron_left),
-                onPressed: () {
-                  setState(() => _sidebarCollapsed = true);
-                },
-              ),
-            ],
-          ),
-          const SizedBox(height: 8),
-          Expanded(
-            child: DecoratedBox(
-              decoration: BoxDecoration(
-                color: colors.background,
-                borderRadius: BorderRadius.circular(10),
-                border: Border.all(color: colors.outlineVariant),
-              ),
-              child: _buildSiblingList(context),
-            ),
-          ),
-        ],
-      ),
-    );
-  }
-
-  // 折叠后的侧边栏展开按钮。
-  Widget _buildSidebarToggle(BuildContext context) {
-    final ColorScheme colors = Theme.of(context).colorScheme;
-    return Container(
-      width: 44,
-      color: colors.outlineVariant.withOpacity(0.2),
-      child: IconButton(
-        tooltip: '展开文件列表',
-        icon: const Icon(Icons.chevron_right),
-        onPressed: () {
-          setState(() => _sidebarCollapsed = false);
-        },
-      ),
     );
   }
 
@@ -732,6 +724,20 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
   bool _isEditableFile(String path) {
     final ext = p.extension(path).toLowerCase().replaceFirst('.', '');
     return ['md', 'markdown', 'txt'].contains(ext);
+  }
+
+  Future<void> _openLink(String href) async {
+    final Uri uri = Uri.parse(href);
+    if (!await canLaunchUrl(uri)) {
+      _showError('无法打开链接');
+      return;
+    }
+
+    final bool ok = await launchUrl(uri, mode: LaunchMode.externalApplication);
+
+    if (!ok) {
+      _showError('无法打开链接');
+    }
   }
 }
 

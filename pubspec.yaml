@@ -38,6 +38,8 @@ dependencies:
   file_selector: ^1.0.3
   path: ^1.9.0
   url_launcher: ^6.3.0
+  fluent_ui: ^4.8.6
+  window_manager: ^0.3.9
 
 dev_dependencies:
   flutter_test:
