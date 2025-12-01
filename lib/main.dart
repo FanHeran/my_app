@@ -22,47 +22,107 @@ class SaveAsIntent extends Intent {
   const SaveAsIntent();
 }
 
-class MarkdownDesktopApp extends StatelessWidget {
+class MarkdownDesktopApp extends StatefulWidget {
   const MarkdownDesktopApp({super.key});
+
+  @override
+  State<MarkdownDesktopApp> createState() => _MarkdownDesktopAppState();
+}
+
+class _MarkdownDesktopAppState extends State<MarkdownDesktopApp> {
+  ThemeMode _themeMode = ThemeMode.light;
+
+  void _toggleTheme() {
+    setState(() {
+      _themeMode = _themeMode == ThemeMode.light
+          ? ThemeMode.dark
+          : ThemeMode.light;
+    });
+  }
+
+  ThemeData _buildLightTheme() {
+    return ThemeData(
+      colorScheme: ColorScheme.fromSeed(
+        seedColor: Colors.blueGrey,
+        brightness: Brightness.light,
+      ),
+      scaffoldBackgroundColor: const Color(0xFFF4F6F8),
+      appBarTheme: const AppBarTheme(
+        elevation: 0.5,
+        surfaceTintColor: Colors.transparent,
+        backgroundColor: Color(0xFFEFF1F4),
+        toolbarHeight: 48,
+        titleSpacing: 12,
+      ),
+      cardTheme: CardThemeData(
+        color: Colors.white,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        elevation: 0,
+      ),
+      textSelectionTheme: TextSelectionThemeData(
+        selectionColor: Colors.blueGrey.withOpacity(0.20),
+        selectionHandleColor: Colors.blueGrey,
+      ),
+      useMaterial3: true,
+      fontFamily: Platform.isLinux ? "Inter" : "Segoe UI",
+    );
+  }
+
+  ThemeData _buildDarkTheme() {
+    final ColorScheme colors = ColorScheme.fromSeed(
+      seedColor: Colors.blueGrey,
+      brightness: Brightness.dark,
+    );
+    return ThemeData(
+      colorScheme: colors,
+      scaffoldBackgroundColor: const Color(0xFF0F1419),
+      appBarTheme: AppBarTheme(
+        elevation: 0.2,
+        surfaceTintColor: Colors.transparent,
+        backgroundColor: Colors.grey.shade900,
+        toolbarHeight: 48,
+        titleSpacing: 12,
+      ),
+      cardTheme: CardThemeData(
+        color: Colors.grey.shade900,
+        surfaceTintColor: Colors.transparent,
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+        elevation: 0,
+      ),
+      textSelectionTheme: TextSelectionThemeData(
+        selectionColor: colors.primary.withOpacity(0.25),
+        selectionHandleColor: colors.primary,
+      ),
+      useMaterial3: true,
+      fontFamily: Platform.isLinux ? "Inter" : "Segoe UI",
+    );
+  }
 
   @override
   Widget build(BuildContext context) {
     return MaterialApp(
       title: 'Markdown Desktop',
-      theme: ThemeData(
-        colorScheme: ColorScheme.fromSeed(
-          seedColor: Colors.blueGrey,
-          brightness: Brightness.light,
-        ),
-        scaffoldBackgroundColor: const Color(0xFFF4F6F8),
-        appBarTheme: const AppBarTheme(
-          elevation: 0.5,
-          surfaceTintColor: Colors.transparent,
-          backgroundColor: Color(0xFFEFF1F4),
-          toolbarHeight: 48,
-          titleSpacing: 12,
-        ),
-        cardTheme: CardThemeData(
-          color: Colors.white,
-          surfaceTintColor: Colors.transparent,
-          shape: RoundedRectangleBorder(
-            borderRadius: BorderRadius.circular(12),
-          ),
-          elevation: 0,
-        ),
-        textSelectionTheme: TextSelectionThemeData(
-          selectionColor: Colors.blueGrey.withOpacity(0.20),
-          selectionHandleColor: Colors.blueGrey,
-        ),
-        useMaterial3: true,
+      theme: _buildLightTheme(),
+      darkTheme: _buildDarkTheme(),
+      themeMode: _themeMode,
+      home: MarkdownHomePage(
+        themeMode: _themeMode,
+        onToggleTheme: _toggleTheme,
       ),
-      home: const MarkdownHomePage(),
     );
   }
 }
 
 class MarkdownHomePage extends StatefulWidget {
-  const MarkdownHomePage({super.key});
+  const MarkdownHomePage({
+    super.key,
+    required this.themeMode,
+    required this.onToggleTheme,
+  });
+
+  final ThemeMode themeMode;
+  final VoidCallback onToggleTheme;
 
   @override
   State<MarkdownHomePage> createState() => _MarkdownHomePageState();
@@ -90,6 +150,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
   double _splitRatio = 0.55;
   // 拖动分隔条时的标记。
   bool _draggingSplit = false;
+  bool get _isDark => widget.themeMode == ThemeMode.dark;
 
   @override
   void initState() {
@@ -267,6 +328,15 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
                     icon: const Icon(Icons.save_as_outlined),
                     onPressed: _saving ? null : () => _saveFile(saveAs: true),
                   ),
+                  IconButton(
+                    tooltip: _isDark ? '切换为浅色' : '切换为深色',
+                    icon: Icon(
+                      _isDark
+                          ? Icons.wb_sunny_outlined
+                          : Icons.dark_mode_outlined,
+                    ),
+                    onPressed: widget.onToggleTheme,
+                  ),
                   const Spacer(),
                   Expanded(
                     child: Text(
@@ -348,6 +418,14 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
           );
         }
 
+        final double sidebarWidth = _sidebarCollapsed ? 44 : 240;
+        final double handleWidth = 12;
+        final double availableWidth =
+            (constraints.maxWidth - sidebarWidth - handleWidth).clamp(
+              300,
+              constraints.maxWidth,
+            );
+
         return Row(
           crossAxisAlignment: CrossAxisAlignment.stretch,
           children: [
@@ -358,7 +436,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
               flex: (editorFlex * 1000).toInt(),
               child: _buildEditor(context),
             ),
-            _buildDragHandle(),
+            _buildDragHandle(availableWidth),
             Expanded(
               flex: (previewFlex * 1000).toInt(),
               child: _buildPreview(context),
@@ -373,7 +451,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
     final ColorScheme colors = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(16),
-      color: const Color(0xFFE9ECEF),
+      color: colors.surfaceVariant.withOpacity(0.35),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -419,7 +497,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
     final ColorScheme colors = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(16),
-      color: const Color(0xFFEFF1F4),
+      color: colors.surfaceVariant.withOpacity(0.45),
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
@@ -474,7 +552,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
   }
 
   // 编辑/预览的可拖动分隔条（仅宽屏）。
-  Widget _buildDragHandle() {
+  Widget _buildDragHandle(double availableWidth) {
     final ColorScheme colors = Theme.of(context).colorScheme;
     return MouseRegion(
       cursor: SystemMouseCursors.resizeLeftRight,
@@ -489,10 +567,8 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
         onHorizontalDragUpdate: (details) {
           // 根据拖动距离微调比例。
           setState(() {
-            _splitRatio = (_splitRatio + details.delta.dx / 800).clamp(
-              0.25,
-              0.75,
-            );
+            _splitRatio = (_splitRatio + details.delta.dx / availableWidth)
+                .clamp(0.25, 0.75);
           });
         },
         child: Container(
@@ -575,6 +651,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
     final ColorScheme colors = Theme.of(context).colorScheme;
     return Container(
       padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(color: colors.surfaceVariant.withOpacity(0.45)),
       child: Column(
         children: [
           Row(
