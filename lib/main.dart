@@ -101,7 +101,7 @@ class MarkdownHomePage extends StatefulWidget {
   State<MarkdownHomePage> createState() => _MarkdownHomePageState();
 }
 
-class _MarkdownHomePageState extends State<MarkdownHomePage> {
+class _MarkdownHomePageState extends State<MarkdownHomePage> with WindowListener {
   // 编辑器内容控制器。
   final TextEditingController _controller = TextEditingController();
   // 本地文件选择允许的 Markdown 扩展。
@@ -111,6 +111,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
   );
 
   String? _currentPath;
+  String _lastSavedContent = '';
   // 是否有未保存的更改。
   bool _dirty = false;
   bool _saving = false;
@@ -132,32 +133,52 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
   void initState() {
     super.initState();
     _controller.text = '# Markdown 笔记\n\n在左侧编辑，右侧实时预览。';
+    _lastSavedContent = _controller.text;
     _controller.addListener(_onTextChanged);
+    windowManager.addListener(this);
+    windowManager.setPreventClose(true);
   }
 
   bool get _isDark => widget.themeMode == ThemeMode.dark;
 
   void _onTextChanged() {
-    // 文字变化即刻刷新预览，并标记未保存。
-    setState(() {
-      _dirty = true;
-    });
-    _updateWindowTitle();
+    final String current = _controller.text;
+    final bool dirtyNow = current != _lastSavedContent;
+    if (dirtyNow != _dirty) {
+      setState(() {
+        _dirty = dirtyNow;
+      });
+      _updateWindowTitle();
+    }
   }
 
   @override
   void dispose() {
+    windowManager.removeListener(this);
     _controller.dispose();
     super.dispose();
   }
 
+  @override
+  Future<void> onWindowClose() async {
+    final shouldClose = await _confirmClose();
+    if (shouldClose) {
+      await windowManager.destroy();
+    }
+  }
+
   Future<void> _newFile() async {
+    if (_dirty) {
+      final bool proceed = await _confirmDirtyBeforeAction('创建新文件');
+      if (!proceed) return;
+    }
     setState(() {
       _controller.clear();
       _currentPath = null;
       _dirty = false;
       _status = '新建 Markdown';
       _siblingFiles = const [];
+      _lastSavedContent = _controller.text;
     });
     _updateWindowTitle();
   }
@@ -173,6 +194,11 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
         return;
       }
 
+      if (_dirty && path != _currentPath) {
+        final bool proceed = await _confirmDirtyBeforeAction('打开其他文件');
+        if (!proceed) return;
+      }
+
       await _openFileAtPath(path);
     } catch (e) {
       _showError('打开失败: $e');
@@ -180,6 +206,10 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
   }
 
   Future<void> _openFileAtPath(String path) async {
+    if (_dirty && path != _currentPath) {
+      final bool proceed = await _confirmDirtyBeforeAction('切换文件');
+      if (!proceed) return;
+    }
     try {
       final File f = File(path);
       final String content = await f.readAsString();
@@ -188,6 +218,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
         _currentPath = path;
         _dirty = false;
         _status = '已打开 ${p.basename(path)}';
+        _lastSavedContent = content;
       });
       await _refreshSiblingFiles(path);
       _updateWindowTitle();
@@ -196,8 +227,8 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
     }
   }
 
-  Future<void> _saveFile({bool saveAs = false}) async {
-    if (_saving) return;
+  Future<bool> _saveFile({bool saveAs = false}) async {
+    if (_saving) return false;
 
     String? targetPath = _currentPath;
     if (saveAs || targetPath == null) {
@@ -213,7 +244,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
         setState(() {
           _status = '已取消保存';
         });
-        return;
+        return false;
       }
 
       targetPath = location.path;
@@ -231,11 +262,14 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
         _currentPath = savePath;
         _dirty = false;
         _status = '已保存 ${p.basename(savePath)}';
+        _lastSavedContent = _controller.text;
       });
       await _refreshSiblingFiles(savePath);
       _updateWindowTitle();
+      return true;
     } catch (e) {
       _showError('保存失败: $e');
+      return false;
     } finally {
       if (mounted) {
         setState(() {
@@ -252,45 +286,102 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
     });
   }
 
+  Future<bool> _confirmClose() async {
+    if (!_dirty) return true;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => ContentDialog(
+        title: const Text('有未保存的更改'),
+        content: const Text('退出前要保存当前文件吗？'),
+        actions: [
+          Button(
+            child: const Text('取消'),
+            onPressed: () => Navigator.pop(ctx, false),
+          ),
+          Button(
+            child: const Text('不保存'),
+            onPressed: () => Navigator.pop(ctx, true),
+          ),
+          FilledButton(
+            child: const Text('保存并退出'),
+            onPressed: () async {
+              final ok = await _saveFile();
+              Navigator.pop(ctx, ok);
+            },
+          ),
+        ],
+      ),
+    );
+
+    return result ?? false;
+  }
+
+  Future<bool> _confirmDirtyBeforeAction(String actionLabel) async {
+    if (!_dirty) return true;
+
+    final result = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => ContentDialog(
+        title: Text('有未保存的更改'),
+        content: Text('$actionLabel 前是否保存当前文件？'),
+        actions: [
+          Button(
+            child: const Text('取消'),
+            onPressed: () => Navigator.pop(ctx, false),
+          ),
+          Button(
+            child: const Text('不保存'),
+            onPressed: () => Navigator.pop(ctx, true),
+          ),
+          FilledButton(
+            child: const Text('保存并继续'),
+            onPressed: () async {
+              final ok = await _saveFile();
+              Navigator.pop(ctx, ok);
+            },
+          ),
+        ],
+      ),
+    );
+
+    return result ?? false;
+  }
+
   @override
   Widget build(BuildContext context) {
     final String title = _windowTitle;
 
-    return Shortcuts(
-      shortcuts: const <ShortcutActivator, Intent>{
-        SingleActivator(LogicalKeyboardKey.keyS, control: true): SaveIntent(),
-        SingleActivator(LogicalKeyboardKey.keyS, control: true, shift: true):
-            SaveAsIntent(),
-      },
-      child: Actions(
-        actions: <Type, Action<Intent>>{
-          SaveIntent: CallbackAction<SaveIntent>(
-            onInvoke: (_) {
-              _saveFile();
-              return null;
-            },
-          ),
-          SaveAsIntent: CallbackAction<SaveAsIntent>(
-            onInvoke: (_) {
-              _saveFile(saveAs: true);
-              return null;
-            },
-          ),
+    return WillPopScope(
+      onWillPop: _confirmClose,
+      child: Shortcuts(
+        shortcuts: const <ShortcutActivator, Intent>{
+          SingleActivator(LogicalKeyboardKey.keyS, control: true): SaveIntent(),
+          SingleActivator(LogicalKeyboardKey.keyS, control: true, shift: true):
+              SaveAsIntent(),
         },
-        child: NavigationView(
-          // appBar: NavigationAppBar(
-          //   automaticallyImplyLeading: false,
-          //   title: Text(title, overflow: TextOverflow.ellipsis),
-          //   // height: 44,
-          //   backgroundColor: FluentTheme.of(
-          //     context,
-          //   ).accentColor.withOpacity(0.08),
-          // ),
-          content: ScaffoldPage(
-            padding: EdgeInsets.zero,
-            header: _buildCommandBar(context),
-            content: _buildWorkspace(context),
-            bottomBar: _buildStatusBar(context),
+        child: Actions(
+          actions: <Type, Action<Intent>>{
+            SaveIntent: CallbackAction<SaveIntent>(
+              onInvoke: (_) {
+                _saveFile();
+                return null;
+              },
+            ),
+            SaveAsIntent: CallbackAction<SaveAsIntent>(
+              onInvoke: (_) {
+                _saveFile(saveAs: true);
+                return null;
+              },
+            ),
+          },
+          child: NavigationView(
+            content: ScaffoldPage(
+              padding: EdgeInsets.zero,
+              header: _buildCommandBar(context),
+              content: _buildWorkspace(context),
+              bottomBar: _buildStatusBar(context),
+            ),
           ),
         ),
       ),
@@ -316,6 +407,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
       ),
       child: Row(
         children: [
+          const SizedBox(width: 12),
           Expanded(
             child: CommandBar(
               mainAxisAlignment: MainAxisAlignment.start,
@@ -345,10 +437,13 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
             ),
           ),
           const SizedBox(width: 12),
-          ToggleSwitch(
-            checked: _isDark,
-            content: Text(_isDark ? '暗色' : '浅色'),
-            onChanged: (_) => widget.onToggleTheme(),
+          Padding(
+            padding: const EdgeInsets.symmetric(horizontal: 8.0),
+            child: ToggleSwitch(
+              checked: _isDark,
+              content: Text(_isDark ? '暗色' : '浅色'),
+              onChanged: (_) => widget.onToggleTheme(),
+            ),
           ),
         ],
       ),
@@ -402,10 +497,18 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
               _sidebarCollapsed
                   ? SizedBox(height: 44, child: _buildSidebarToggle(context))
                   : SizedBox(height: 220, child: _buildSidebar(context)),
-              const SizedBox(height: 8),
-              Expanded(child: _buildEditor(context)),
-              const Divider(size: 1),
-              Expanded(child: _buildPreview(context)),
+              Expanded(
+                child: Container(
+                  color: FluentTheme.of(context).micaBackgroundColor,
+                  child: Column(
+                    children: [
+                      Expanded(child: _buildEditor(context)),
+                      const Divider(size: 1),
+                      Expanded(child: _buildPreview(context)),
+                    ],
+                  ),
+                ),
+              ),
             ],
           );
         }
@@ -418,22 +521,27 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
               constraints.maxWidth,
             );
 
-        return Row(
-          crossAxisAlignment: CrossAxisAlignment.stretch,
-          children: [
-            _sidebarCollapsed
-                ? _buildSidebarToggle(context)
-                : SizedBox(width: 240, child: _buildSidebar(context)),
-            Expanded(
-              flex: (editorFlex * 1000).toInt(),
-              child: _buildEditor(context),
-            ),
-            _buildDragHandle(availableWidth),
-            Expanded(
-              flex: (previewFlex * 1000).toInt(),
-              child: _buildPreview(context),
-            ),
-          ],
+    final theme = FluentTheme.of(context);
+    final mica = theme.micaBackgroundColor;
+    return Container(
+      color: mica,
+      child: Row(
+            crossAxisAlignment: CrossAxisAlignment.stretch,
+            children: [
+              _sidebarCollapsed
+                  ? _buildSidebarToggle(context)
+                  : SizedBox(width: 240, child: _buildSidebar(context)),
+              Expanded(
+                flex: (editorFlex * 1000).toInt(),
+                child: _buildEditor(context),
+              ),
+              _buildDragHandle(availableWidth),
+              Expanded(
+                flex: (previewFlex * 1000).toInt(),
+                child: _buildPreview(context),
+              ),
+            ],
+          ),
         );
       },
     );
@@ -470,7 +578,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
             child: Container(
               decoration: BoxDecoration(
                 color: colors.cardColor,
-                borderRadius: BorderRadius.circular(10),
+                borderRadius: BorderRadius.circular(8),
                 border: Border.all(
                   color: colors.resources.surfaceStrokeColorDefault,
                 ),
@@ -496,16 +604,16 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
   }
 
   Widget _buildEditor(BuildContext context) {
-    final colors = FluentTheme.of(context);
+    final theme = FluentTheme.of(context);
     return Container(
       padding: const EdgeInsets.all(16),
-      color: colors.scaffoldBackgroundColor,
+    color: theme.micaBackgroundColor,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              Icon(FluentIcons.edit, color: colors.accentColor),
+              Icon(FluentIcons.edit, color: theme.accentColor),
               const SizedBox(width: 8),
               const Text('Markdown 编辑'),
             ],
@@ -514,10 +622,10 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
           Expanded(
             child: Container(
               decoration: BoxDecoration(
-                color: colors.cardColor,
-                borderRadius: BorderRadius.circular(12),
+                color: theme.cardColor,
+                borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: colors.resources.surfaceStrokeColorDefault,
+                  color: theme.resources.surfaceStrokeColorDefault,
                 ),
               ),
               child: TextBox(
@@ -527,7 +635,16 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
                 minLines: null,
                 keyboardType: TextInputType.multiline,
                 style: const TextStyle(fontFamily: 'monospace'),
-                decoration: null,
+                highlightColor: Colors.transparent,
+                unfocusedColor: Colors.transparent,
+                decoration: WidgetStateProperty.resolveWith(
+                  (states) => const BoxDecoration(
+                    border: Border.fromBorderSide(
+                      BorderSide(color: Colors.transparent, width: 0),
+                    ),
+                    color: Colors.transparent,
+                  ),
+                ),
                 padding: const EdgeInsets.all(16),
               ),
             ),
@@ -538,7 +655,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
   }
 
   Widget _buildPreview(BuildContext context) {
-    final colors = FluentTheme.of(context);
+    final theme = FluentTheme.of(context);
     // 为 Markdown 提供一份 Material 风格的主题，确保组件样式一致。
     final baseTextTheme = m.ThemeData(
       brightness: _isDark ? Brightness.dark : Brightness.light,
@@ -551,7 +668,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
     );
     final materialTheme = m.ThemeData(
       colorScheme: m.ColorScheme.fromSeed(
-        seedColor: colors.accentColor,
+        seedColor: theme.accentColor,
         brightness: _isDark ? Brightness.dark : Brightness.light,
       ),
       textTheme: safeTextTheme,
@@ -560,13 +677,13 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
 
     return Container(
       padding: const EdgeInsets.all(16),
-      color: colors.scaffoldBackgroundColor,
+      color: theme.micaBackgroundColor,
       child: Column(
         crossAxisAlignment: CrossAxisAlignment.stretch,
         children: [
           Row(
             children: [
-              Icon(FluentIcons.view, color: colors.accentColor),
+              Icon(FluentIcons.view, color: theme.accentColor),
               const SizedBox(width: 8),
               const Text('实时预览'),
             ],
@@ -575,16 +692,16 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
           Expanded(
             child: Container(
               decoration: BoxDecoration(
-                color: colors.cardColor,
-                borderRadius: BorderRadius.circular(12),
+                color: theme.cardColor,
+                borderRadius: BorderRadius.circular(8),
                 border: Border.all(
-                  color: colors.resources.surfaceStrokeColorDefault,
+                  color: theme.resources.surfaceStrokeColorDefault,
                 ),
               ),
               child: DefaultSelectionStyle.merge(
                 // 强化选中文本高亮，特别是代码块内。
                 selectionColor: const Color(0xFFB7D5FF),
-                cursorColor: colors.accentColor,
+                cursorColor: theme.accentColor,
                 child: m.Theme(
                   data: materialTheme,
                   child: Markdown(
@@ -605,7 +722,7 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> {
                           code: const TextStyle(fontFamily: 'monospace'),
                           codeblockPadding: const EdgeInsets.all(12),
                           blockquoteDecoration: BoxDecoration(
-                            color: colors.micaBackgroundColor,
+                            color: theme.micaBackgroundColor,
                             borderRadius: BorderRadius.circular(8),
                           ),
                         ),
