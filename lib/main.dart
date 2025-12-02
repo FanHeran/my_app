@@ -3,7 +3,7 @@ import 'dart:io';
 import 'package:file_selector/file_selector.dart';
 import 'package:fluent_ui/fluent_ui.dart';
 import 'package:flutter/services.dart';
-import 'package:flutter_markdown/flutter_markdown.dart';
+import 'package:flutter_markdown_plus/flutter_markdown_plus.dart';
 import 'package:markdown/markdown.dart' as md;
 import 'package:path/path.dart' as p;
 import 'package:url_launcher/url_launcher.dart';
@@ -163,7 +163,9 @@ class _MarkdownHomePageState extends State<MarkdownHomePage> with WindowListener
   Future<void> onWindowClose() async {
     final shouldClose = await _confirmClose();
     if (shouldClose) {
-      await windowManager.destroy();
+      // 先取消拦截再正常关闭，避免卡死
+      await windowManager.setPreventClose(false);
+      await windowManager.close();
     }
   }
 
