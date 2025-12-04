@@ -1,12 +1,15 @@
 # Markdown 桌面编辑器（Flutter + Fluent UI）
 
 跨平台（桌面优先）的 Markdown 编辑与预览工具，采用 Fluent UI 风格。支持本地文件的打开、编辑、保存/另存为，实时预览和快捷键操作。
+
 ## 测试平台
-|平台|结果|
-|---|---|
-|Windows|✅|
-|macOS|None|
-|Linux|✅|
+
+| 平台    | 结果 |
+| ------- | ---- |
+| Windows | ✅   |
+| macOS   | None |
+| Linux   | ✅   |
+
 ![1](./docs/imgs/1.png)
 ![2](./docs/imgs/2.png)
 ![3](./docs/imgs/3.png)
